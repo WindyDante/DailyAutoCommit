@@ -1,0 +1,67 @@
+name: Daily Auto Commit
+
+on:
+  schedule:
+    - cron: '0 1 * * *'  # UTC 01:00 → 北京 09:00
+    - cron: '0 9 * * *'  # UTC 09:00 → 北京 17:00
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  commit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      TZ: Asia/Shanghai
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "WindyDante"
+          git config user.email "WindyDante@users.noreply.github.com"
+          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+
+      - name: Sync and Commit
+        run: |
+          # 同步最新代码（带冲突解决）
+          git pull --rebase origin ${{ github.ref }}
+          
+          # 生成北京时间戳
+          commit_time=$(date +"%Y-%m-%d %H:%M CST")
+          
+          # 创建空提交
+          git commit --allow-empty \
+            -m "chore: keep-alive at ${commit_time} [skip ci]" \
+            --author="WindyDante <WindyDante@users.noreply.github.com>"
+
+      - name: Push with Retry
+        run: |
+          attempts=0
+          max_attempts=3
+          
+          while [ $attempts -lt $max_attempts ]; do
+            if git push origin HEAD:${{ github.ref }}; then
+              echo "Push successful"
+              exit 0
+            fi
+            
+            ((attempts++))
+            echo "Attempt $attempts failed, retrying..."
+            
+            # 随机等待1-10秒
+            sleep $(( RANDOM % 10 + 1 ))
+            
+            # 同步最新代码
+            git pull --rebase origin ${{ github.ref }}
+          done
+          
+          echo "All push attempts failed"
+          exit 1
